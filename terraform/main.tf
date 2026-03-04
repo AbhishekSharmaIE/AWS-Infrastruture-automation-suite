@@ -483,3 +483,88 @@ module "acm" {
 
   subject_alternative_names = [
     "*.${var.domain_name}",
+  ]
+
+  validation_method = "DNS"
+  wait_for_validation = true
+
+  tags = local.common_tags
+}
+
+# ─── Application Load Balancer ────────────────────────────────────────────────
+
+resource "aws_s3_bucket" "alb_logs" {
+  provider      = aws.primary
+  bucket_prefix = "${local.name_prefix}-alb-logs-"
+  force_destroy = var.environment != "prod"
+  tags          = local.common_tags
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "alb_logs" {
+  provider = aws.primary
+  bucket   = aws_s3_bucket.alb_logs.id
+
+  rule {
+    id     = "expire-old-logs"
+    status = "Enabled"
+
+    expiration {
+      days = var.environment == "prod" ? 90 : 30
+    }
+
+    transition {
+      days          = 30
+      storage_class = "STANDARD_IA"
+    }
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "alb_logs" {
+  provider = aws.primary
+  bucket   = aws_s3_bucket.alb_logs.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "alb_logs" {
+  provider                = aws.primary
+  bucket                  = aws_s3_bucket.alb_logs.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+module "alb" {
+  source  = "terraform-aws-modules/alb/aws"
+  version = "~> 9.0"
+  providers = { aws = aws.primary }
+
+  name    = local.name_prefix
+  vpc_id  = module.vpc_primary.vpc_id
+  subnets = module.vpc_primary.public_subnets
+
+  enable_deletion_protection = var.environment == "prod"
+  enable_http2               = true
+  drop_invalid_header_fields = true
+  idle_timeout               = 60
+
+  access_logs = {
+    bucket  = aws_s3_bucket.alb_logs.id
+    prefix  = "alb"
+    enabled = true
+  }
+
+  security_group_ingress_rules = {
+    http  = { from_port = 80, to_port = 80, ip_protocol = "tcp", cidr_ipv4 = "0.0.0.0/0" }
+    https = { from_port = 443, to_port = 443, ip_protocol = "tcp", cidr_ipv4 = "0.0.0.0/0" }
+  }
+
+  security_group_egress_rules = {
+    all = { ip_protocol = "-1", cidr_ipv4 = var.primary_vpc_cidr }
+  }
+
