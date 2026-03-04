@@ -143,3 +143,38 @@ module "vpc_secondary" {
   create_database_subnet_group       = true
   create_database_subnet_route_table = true
 
+  enable_flow_log                      = true
+  create_flow_log_cloudwatch_log_group = true
+  create_flow_log_cloudwatch_iam_role  = true
+  flow_log_max_aggregation_interval    = 60
+
+  tags = local.common_tags
+}
+
+# ─── VPC Peering ──────────────────────────────────────────────────────────────
+
+resource "aws_vpc_peering_connection" "cross_region" {
+  provider    = aws.primary
+  vpc_id      = module.vpc_primary.vpc_id
+  peer_vpc_id = module.vpc_secondary.vpc_id
+  peer_region = var.secondary_region
+  auto_accept = false
+  tags        = { Name = "${local.name_prefix}-cross-region-peering" }
+}
+
+resource "aws_vpc_peering_connection_accepter" "cross_region" {
+  provider                  = aws.secondary
+  vpc_peering_connection_id = aws_vpc_peering_connection.cross_region.id
+  auto_accept               = true
+  tags                      = { Name = "${local.name_prefix}-cross-region-peering" }
+}
+
+resource "aws_route" "primary_to_secondary" {
+  count                     = length(module.vpc_primary.private_route_table_ids)
+  provider                  = aws.primary
+  route_table_id            = module.vpc_primary.private_route_table_ids[count.index]
+  destination_cidr_block    = var.secondary_vpc_cidr
+  vpc_peering_connection_id = aws_vpc_peering_connection.cross_region.id
+}
+
+resource "aws_route" "secondary_to_primary" {
