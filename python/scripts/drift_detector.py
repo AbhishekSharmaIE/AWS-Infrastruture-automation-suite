@@ -148,3 +148,73 @@ class DriftDetector:
                         resource_type="aws_ebs_volume",
                         resource_id=vol["VolumeId"],
                         drift_type="modified",
+                        details="EBS volume is not encrypted",
+                        severity="high",
+                    ))
+        except Exception:
+            pass
+        return results
+
+    def _check_iam_anomalies(self) -> list[DriftResult]:
+        results = []
+        iam = boto3.client("iam")
+        try:
+            roles = iam.list_roles()["Roles"]
+            for role in roles:
+                if self.project not in role["RoleName"]:
+                    continue
+                policies = iam.list_attached_role_policies(RoleName=role["RoleName"])
+                for policy in policies.get("AttachedPolicies", []):
+                    if policy["PolicyArn"] == "arn:aws:iam::aws:policy/AdministratorAccess":
+                        results.append(DriftResult(
+                            resource_type="aws_iam_role",
+                            resource_id=role["RoleName"],
+                            drift_type="modified",
+                            details="Role has AdministratorAccess attached",
+                            severity="critical",
+                        ))
+        except Exception:
+            pass
+        return results
+
+    def _parse_plan_output(self, output: str) -> list[DriftResult]:
+        results = []
+        for line in output.split("\n"):
+            line = line.strip()
+            if line.startswith("~ ") or line.startswith("+ ") or line.startswith("- "):
+                drift_type = {"~": "modified", "+": "added", "-": "removed"}.get(line[0], "modified")
+                resource = line[2:].strip()
+                results.append(DriftResult(
+                    resource_type="terraform_resource",
+                    resource_id=resource[:100],
+                    drift_type=drift_type,
+                    details=line[:200],
+                    severity="medium" if drift_type == "modified" else "low",
+                ))
+        return results
+
+    def publish_results(self, results: list[DriftResult]):
+        if not results:
+            return
+
+        cw = boto3.client("cloudwatch", region_name="us-east-1")
+        cw.put_metric_data(
+            Namespace=f"Custom/{self.project}",
+            MetricData=[{
+                "MetricName": "DriftCount",
+                "Dimensions": [
+                    {"Name": "Environment", "Value": self.environment},
+                    {"Name": "Severity", "Value": severity},
+                ],
+                "Value": count,
+                "Unit": "Count",
+            } for severity, count in self._count_by_severity(results).items()],
+        )
+
+    def _count_by_severity(self, results: list[DriftResult]) -> dict:
+        counts = {"low": 0, "medium": 0, "high": 0, "critical": 0}
+        for r in results:
+            counts[r.severity] = counts.get(r.severity, 0) + 1
+        return counts
+
+    def print_results(self, results: list[DriftResult]):
