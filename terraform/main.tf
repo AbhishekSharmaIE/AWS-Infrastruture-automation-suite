@@ -298,3 +298,53 @@ resource "aws_rds_global_cluster" "main" {
   database_name             = var.database_name
   storage_encrypted         = true
   deletion_protection       = var.environment == "prod"
+}
+
+module "aurora_primary" {
+  source  = "terraform-aws-modules/rds-aurora/aws"
+  version = "~> 9.0"
+  providers = { aws = aws.primary }
+
+  name           = "${local.name_prefix}-aurora-primary"
+  engine         = "aurora-postgresql"
+  engine_version = var.aurora_engine_version
+  instance_class = var.aurora_instance_class
+
+  instances = {
+    writer   = { instance_class = var.aurora_instance_class }
+    reader-1 = { instance_class = var.aurora_reader_class }
+  }
+
+  global_cluster_identifier = aws_rds_global_cluster.main.id
+  is_primary_cluster        = true
+
+  vpc_id               = module.vpc_primary.vpc_id
+  db_subnet_group_name = module.vpc_primary.database_subnet_group_name
+  security_group_rules = {
+    ingress_from_vpc = {
+      cidr_blocks = [var.primary_vpc_cidr]
+    }
+  }
+
+  storage_encrypted   = true
+  monitoring_interval = 60
+  deletion_protection = var.environment == "prod"
+
+  enabled_cloudwatch_logs_exports = ["postgresql"]
+
+  autoscaling_enabled      = true
+  autoscaling_min_capacity = 1
+  autoscaling_max_capacity = var.aurora_max_replicas
+  autoscaling_target_cpu   = 70
+
+  backup_retention_period      = var.environment == "prod" ? 35 : 7
+  preferred_backup_window      = "02:00-03:00"
+  preferred_maintenance_window = "sun:04:00-sun:05:00"
+
+  apply_immediately = var.environment != "prod"
+
+  tags = local.common_tags
+}
+
+module "aurora_secondary" {
+  source  = "terraform-aws-modules/rds-aurora/aws"
