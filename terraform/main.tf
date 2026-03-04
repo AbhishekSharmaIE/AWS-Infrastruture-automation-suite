@@ -378,3 +378,83 @@ module "aurora_secondary" {
 # ─── ElastiCache Redis ────────────────────────────────────────────────────────
 
 resource "random_password" "redis_auth" {
+  length  = 32
+  special = false
+}
+
+resource "aws_elasticache_parameter_group" "redis" {
+  provider = aws.primary
+  name     = "${local.name_prefix}-redis"
+  family   = "redis7"
+
+  parameter {
+    name  = "maxmemory-policy"
+    value = "volatile-lru"
+  }
+
+  parameter {
+    name  = "notify-keyspace-events"
+    value = "Ex"
+  }
+}
+
+resource "aws_elasticache_subnet_group" "main" {
+  provider   = aws.primary
+  name       = "${local.name_prefix}-redis"
+  subnet_ids = module.vpc_primary.private_subnets
+}
+
+resource "aws_security_group" "redis" {
+  provider    = aws.primary
+  name_prefix = "${local.name_prefix}-redis-"
+  vpc_id      = module.vpc_primary.vpc_id
+  description = "Security group for Redis cluster"
+
+  ingress {
+    from_port   = 6379
+    to_port     = 6379
+    protocol    = "tcp"
+    cidr_blocks = [var.primary_vpc_cidr]
+    description = "Redis from VPC"
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow all outbound"
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+
+  tags = merge(local.common_tags, { Name = "${local.name_prefix}-redis" })
+}
+
+resource "aws_cloudwatch_log_group" "redis_slow" {
+  provider          = aws.primary
+  name              = "/elasticache/${local.name_prefix}/slow-log"
+  retention_in_days = 30
+  tags              = local.common_tags
+}
+
+resource "aws_elasticache_replication_group" "main" {
+  provider                   = aws.primary
+  replication_group_id       = local.name_prefix
+  description                = "Redis cluster for ${var.project_name}"
+  node_type                  = var.redis_node_type
+  num_cache_clusters         = var.environment == "prod" ? 3 : 1
+  port                       = 6379
+  parameter_group_name       = aws_elasticache_parameter_group.redis.name
+  subnet_group_name          = aws_elasticache_subnet_group.main.name
+  security_group_ids         = [aws_security_group.redis.id]
+  at_rest_encryption_enabled = true
+  transit_encryption_enabled = true
+  auth_token                 = random_password.redis_auth.result
+  automatic_failover_enabled = var.environment == "prod"
+  multi_az_enabled           = var.environment == "prod"
+  snapshot_retention_limit   = 7
+  snapshot_window            = "03:00-04:00"
+  maintenance_window         = "mon:04:00-mon:05:00"
