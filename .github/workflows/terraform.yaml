@@ -58,3 +58,43 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install Python deps
+        run: pip install -r requirements.txt
+
+      - name: Lint Python
+        run: |
+          pip install ruff
+          ruff check python/
+
+  # ─── Plan (PR & push to main) ──────────────────────────────────────────────
+
+  plan:
+    name: Plan (${{ matrix.environment }})
+    needs: validate
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    strategy:
+      matrix:
+        environment: [dev]
+    environment: ${{ matrix.environment }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: |
+          terraform init \
+            -backend-config="bucket=tfstate-${{ env.PROJECT_NAME }}-${{ matrix.environment }}-${{ vars.AWS_ACCOUNT_ID }}" \
+            -backend-config="key=${{ matrix.environment }}/terraform.tfstate" \
