@@ -1,0 +1,112 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-aws-dashboards
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  aws-infrastructure.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 1,
+      "id": null,
+      "links": [],
+      "liveNow": false,
+      "panels": [
+        {
+          "title": "EKS Cluster Overview",
+          "type": "row",
+          "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+        },
+        {
+          "title": "Pod Count by Namespace",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+          "targets": [
+            {
+              "expr": "count(kube_pod_info) by (namespace)",
+              "legendFormat": "{{ namespace }}"
+            }
+          ]
+        },
+        {
+          "title": "Node CPU Usage",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
+          "targets": [
+            {
+              "expr": "100 - (avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
+              "legendFormat": "{{ instance }}"
+            }
+          ]
+        },
+        {
+          "title": "Node Memory Usage",
+          "type": "gauge",
+          "datasource": "Prometheus",
+          "gridPos": { "h": 8, "w": 8, "x": 0, "y": 9 },
+          "targets": [
+            {
+              "expr": "(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100",
+              "legendFormat": "{{ instance }}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "max": 100,
+              "min": 0,
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "yellow", "value": 70 },
+                  { "color": "red", "value": 85 }
+                ]
+              },
+              "unit": "percent"
+            }
+          }
+        },
+        {
+          "title": "Pod Restart Count (Last Hour)",
+          "type": "stat",
+          "datasource": "Prometheus",
+          "gridPos": { "h": 8, "w": 8, "x": 8, "y": 9 },
+          "targets": [
+            {
+              "expr": "sum(increase(kube_pod_container_status_restarts_total[1h])) by (namespace, pod)",
+              "legendFormat": "{{ namespace }}/{{ pod }}"
+            }
+          ]
+        },
+        {
+          "title": "Container Resource Requests vs Limits",
+          "type": "table",
+          "datasource": "Prometheus",
+          "gridPos": { "h": 8, "w": 8, "x": 16, "y": 9 },
+          "targets": [
+            {
+              "expr": "sum(kube_pod_container_resource_requests{resource=\"cpu\"}) by (namespace)",
+              "legendFormat": "{{ namespace }} CPU req"
+            },
+            {
+              "expr": "sum(kube_pod_container_resource_limits{resource=\"cpu\"}) by (namespace)",
+              "legendFormat": "{{ namespace }} CPU lim"
+            }
+          ]
+        }
+      ],
+      "refresh": "30s",
+      "schemaVersion": 38,
+      "style": "dark",
+      "tags": ["aws", "eks", "infrastructure"],
+      "templating": { "list": [] },
+      "time": { "from": "now-6h", "to": "now" },
+      "timezone": "utc",
+      "title": "AWS Infrastructure Overview",
+      "uid": "aws-infra-overview"
+    }
