@@ -98,3 +98,48 @@ module "vpc_primary" {
   enable_nat_gateway     = true
   single_nat_gateway     = var.environment != "prod"
   enable_dns_hostnames   = true
+  enable_dns_support     = true
+
+  create_database_subnet_group       = true
+  create_database_subnet_route_table = true
+
+  enable_flow_log                      = true
+  create_flow_log_cloudwatch_log_group = true
+  create_flow_log_cloudwatch_iam_role  = true
+  flow_log_max_aggregation_interval    = 60
+
+  private_subnet_tags = {
+    "kubernetes.io/role/internal-elb"                     = "1"
+    "kubernetes.io/cluster/${local.name_prefix}" = "owned"
+  }
+  public_subnet_tags = {
+    "kubernetes.io/role/elb"                              = "1"
+    "kubernetes.io/cluster/${local.name_prefix}" = "owned"
+  }
+
+  tags = local.common_tags
+}
+
+# ─── VPC Secondary ────────────────────────────────────────────────────────────
+
+module "vpc_secondary" {
+  source  = "terraform-aws-modules/vpc/aws"
+  version = "~> 5.0"
+  providers = { aws = aws.secondary }
+
+  name = "${local.name_prefix}-secondary"
+  cidr = var.secondary_vpc_cidr
+  azs  = slice(data.aws_availability_zones.secondary.names, 0, 3)
+
+  private_subnets  = var.secondary_private_subnets
+  public_subnets   = var.secondary_public_subnets
+  database_subnets = var.secondary_database_subnets
+
+  enable_nat_gateway     = true
+  single_nat_gateway     = var.environment != "prod"
+  enable_dns_hostnames   = true
+  enable_dns_support     = true
+
+  create_database_subnet_group       = true
+  create_database_subnet_route_table = true
+
