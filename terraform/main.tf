@@ -728,3 +728,67 @@ resource "aws_wafv2_web_acl_association" "alb" {
 
 resource "aws_wafv2_web_acl_logging_configuration" "main" {
   provider                = aws.primary
+  log_destination_configs = [aws_cloudwatch_log_group.waf.arn]
+  resource_arn            = aws_wafv2_web_acl.main.arn
+}
+
+resource "aws_cloudwatch_log_group" "waf" {
+  provider          = aws.primary
+  name              = "aws-waf-logs-${local.name_prefix}"
+  retention_in_days = 30
+  tags              = local.common_tags
+}
+
+# ─── Route53 Failover ─────────────────────────────────────────────────────────
+
+resource "aws_route53_health_check" "primary" {
+  fqdn              = module.alb.dns_name
+  port              = 443
+  type              = "HTTPS"
+  resource_path     = "/health"
+  failure_threshold = 3
+  request_interval  = 30
+  regions           = ["us-east-1", "eu-west-1", "ap-southeast-1"]
+
+  tags = merge(local.common_tags, { Name = "${local.name_prefix}-primary-health" })
+}
+
+resource "aws_route53_record" "primary" {
+  zone_id = data.aws_route53_zone.main.zone_id
+  name    = var.domain_name
+  type    = "A"
+
+  failover_routing_policy { type = "PRIMARY" }
+
+  set_identifier  = "primary"
+  health_check_id = aws_route53_health_check.primary.id
+
+  alias {
+    name                   = module.alb.dns_name
+    zone_id                = module.alb.zone_id
+    evaluate_target_health = true
+  }
+}
+
+# ─── SNS Alerts ───────────────────────────────────────────────────────────────
+
+resource "aws_sns_topic" "alerts" {
+  provider          = aws.primary
+  name              = "${local.name_prefix}-alerts"
+  kms_master_key_id = "alias/aws/sns"
+  tags              = local.common_tags
+}
+
+resource "aws_sns_topic_subscription" "email" {
+  provider  = aws.primary
+  topic_arn = aws_sns_topic.alerts.arn
+  protocol  = "email"
+  endpoint  = var.alarm_email
+}
+
+resource "aws_sns_topic" "critical" {
+  provider          = aws.primary
+  name              = "${local.name_prefix}-critical"
+  kms_master_key_id = "alias/aws/sns"
+  tags              = local.common_tags
+}
