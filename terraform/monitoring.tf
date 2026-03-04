@@ -318,3 +318,85 @@ resource "aws_cloudwatch_dashboard" "main" {
       },
       {
         type   = "metric"
+        x      = 8
+        y      = 7
+        width  = 8
+        height = 6
+        properties = {
+          title  = "Aurora Database Connections"
+          region = var.primary_region
+          period = 300
+          stat   = "Average"
+          metrics = [
+            ["AWS/RDS", "DatabaseConnections", "DBClusterIdentifier", module.aurora_primary.cluster_id],
+          ]
+        }
+      },
+      {
+        type   = "metric"
+        x      = 16
+        y      = 7
+        width  = 8
+        height = 6
+        properties = {
+          title  = "Aurora Replica Lag"
+          region = var.primary_region
+          period = 60
+          stat   = "Maximum"
+          metrics = [
+            ["AWS/RDS", "AuroraReplicaLag", "DBClusterIdentifier", module.aurora_primary.cluster_id],
+          ]
+        }
+      },
+      {
+        type   = "metric"
+        x      = 0
+        y      = 13
+        width  = 8
+        height = 6
+        properties = {
+          title  = "EKS Node CPU"
+          region = var.primary_region
+          period = 300
+          stat   = "Average"
+          metrics = [
+            ["ContainerInsights", "node_cpu_utilization", "ClusterName", module.eks.cluster_name],
+          ]
+        }
+      },
+      {
+        type   = "metric"
+        x      = 8
+        y      = 13
+        width  = 8
+        height = 6
+        properties = {
+          title  = "EKS Node Memory"
+          region = var.primary_region
+          period = 300
+          stat   = "Average"
+          metrics = [
+            ["ContainerInsights", "node_memory_utilization", "ClusterName", module.eks.cluster_name],
+          ]
+        }
+      },
+      {
+        type   = "metric"
+        x      = 16
+        y      = 13
+        width  = 8
+        height = 6
+        properties = {
+          title  = "Redis CPU & Memory"
+          region = var.primary_region
+          period = 300
+          stat   = "Average"
+          metrics = [
+            ["AWS/ElastiCache", "CPUUtilization", "ReplicationGroupId", aws_elasticache_replication_group.main.id],
+            [".", "DatabaseMemoryUsagePercentage", ".", "."],
+          ]
+        }
+      },
+    ]
+  })
+}
