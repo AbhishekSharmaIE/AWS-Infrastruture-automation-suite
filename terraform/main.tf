@@ -178,3 +178,33 @@ resource "aws_route" "primary_to_secondary" {
 }
 
 resource "aws_route" "secondary_to_primary" {
+  count                     = length(module.vpc_secondary.private_route_table_ids)
+  provider                  = aws.secondary
+  route_table_id            = module.vpc_secondary.private_route_table_ids[count.index]
+  destination_cidr_block    = var.primary_vpc_cidr
+  vpc_peering_connection_id = aws_vpc_peering_connection.cross_region.id
+}
+
+# ─── EKS Cluster ──────────────────────────────────────────────────────────────
+
+module "eks" {
+  source  = "terraform-aws-modules/eks/aws"
+  version = "~> 20.0"
+  providers = { aws = aws.primary }
+
+  cluster_name    = local.name_prefix
+  cluster_version = var.kubernetes_version
+
+  vpc_id                          = module.vpc_primary.vpc_id
+  subnet_ids                      = module.vpc_primary.private_subnets
+  cluster_endpoint_public_access  = true
+  cluster_endpoint_private_access = true
+
+  enable_cluster_creator_admin_permissions = true
+
+  cluster_enabled_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
+
+  cluster_addons = {
+    coredns = {
+      most_recent = true
+      configuration_values = jsonencode({
