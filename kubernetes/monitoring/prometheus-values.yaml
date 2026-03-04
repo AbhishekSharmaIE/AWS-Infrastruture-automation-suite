@@ -136,7 +136,7 @@ prometheus:
 grafana:
   enabled: true
   replicas: 2
-  adminPassword: "change-me-in-production"
+  adminPassword: "CHANGE_ME_IMMEDIATELY"
 
   persistence:
     enabled: true
