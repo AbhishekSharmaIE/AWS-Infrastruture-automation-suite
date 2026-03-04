@@ -368,3 +368,103 @@ class CostEstimator:
                 "Aurora (writer + reader)":  2 * self.HOURLY_COSTS["r7g.large"] * h,
                 "ElastiCache (1 node)":      self.HOURLY_COSTS["cache.r7g.large"] * h,
                 "NAT Gateway (1x)":          45.0,
+                "ALB":                       25.0,
+                "Route53":                   5.0,
+                "CloudWatch":                30.0,
+                "WAF":                       15.0,
+                "S3 (state + logs)":         10.0,
+            },
+            "prod": {
+                "EKS Control Plane":                73.0,
+                "EKS Nodes (6x m6i.2xlarge)":       6 * self.HOURLY_COSTS["m6i.2xlarge"] * h,
+                "EKS Spot Nodes (3x, ~70% savings)": 3 * self.HOURLY_COSTS["m6i.xlarge"] * h * 0.3,
+                "Aurora Primary (writer + reader)":  2 * self.HOURLY_COSTS["r7g.2xlarge"] * h,
+                "Aurora Secondary (1 reader)":       self.HOURLY_COSTS["r7g.xlarge"] * h,
+                "ElastiCache (3 nodes)":             3 * self.HOURLY_COSTS["cache.r7g.2xlarge"] * h,
+                "NAT Gateways (6x across 2 regions)": 6 * 45.0,
+                "ALB (2x regions)":                  50.0,
+                "Route53 + Health Checks":           20.0,
+                "CloudWatch + Dashboards":           80.0,
+                "WAF":                               25.0,
+                "S3 (state + logs)":                 20.0,
+                "Cross-region data transfer":        100.0,
+            },
+        }
+
+        estimates = profiles.get(environment, profiles["dev"])
+        total = sum(estimates.values())
+        estimates["TOTAL (estimated monthly USD)"] = total
+        return estimates
+
+    def print_estimate(self, environment: str):
+        estimates = self.estimate(environment)
+        table = Table(title=f"Cost Estimate - {environment.upper()}")
+        table.add_column("Resource", style="cyan")
+        table.add_column("Monthly Cost (USD)", style="green", justify="right")
+
+        for resource, cost in estimates.items():
+            style = "bold yellow" if "TOTAL" in resource else ""
+            table.add_row(resource, f"${cost:,.2f}", style=style)
+
+        console.print(table)
+
+
+# ─── Post-Deploy Setup ─────────────────────────────────────────────────────────
+
+class PostDeploySetup:
+    """Configures EKS cluster tools and monitoring after infrastructure deploy."""
+
+    def __init__(self, config: DeployConfig, outputs: dict):
+        self.config = config
+        self.outputs = outputs
+
+    def run(self):
+        steps = [
+            ("Configure kubectl", self._configure_kubectl),
+            ("Install Cluster Autoscaler", self._install_cluster_autoscaler),
+            ("Install AWS Load Balancer Controller", self._install_alb_controller),
+            ("Install metrics-server", self._install_metrics_server),
+            ("Install Prometheus + Grafana", self._install_monitoring),
+            ("Configure Container Insights", self._enable_container_insights),
+        ]
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Post-deploy setup...", total=len(steps))
+            for name, fn in steps:
+                progress.update(task, description=f"[cyan]{name}...")
+                try:
+                    fn()
+                    log.info(f"Completed: {name}")
+                except Exception as e:
+                    log.warning(f"{name} failed: {e}")
+                progress.advance(task)
+
+    def _get_output(self, key: str) -> Optional[str]:
+        entry = self.outputs.get(key)
+        if isinstance(entry, dict):
+            return entry.get("value")
+        return entry
+
+    def _configure_kubectl(self):
+        cluster_name = self._get_output("eks_cluster_name")
+        if not cluster_name:
+            raise RuntimeError("eks_cluster_name not found in outputs")
+        subprocess.run([
+            "aws", "eks", "update-kubeconfig",
+            "--region", self.config.primary_region,
+            "--name", cluster_name,
+        ], check=True, capture_output=True)
+
+    def _install_cluster_autoscaler(self):
+        cluster_name = self._get_output("eks_cluster_name")
+        subprocess.run([
+            "helm", "upgrade", "--install", "cluster-autoscaler",
+            "autoscaler/cluster-autoscaler",
+            "--namespace", "kube-system",
+            "--set", f"autoDiscovery.clusterName={cluster_name}",
+            "--set", f"awsRegion={self.config.primary_region}",
