@@ -678,3 +678,53 @@ resource "aws_wafv2_web_acl" "main" {
     }
   }
 
+  rule {
+    name     = "RateLimitRule"
+    priority = 4
+    action { block {} }
+    statement {
+      rate_based_statement {
+        limit              = var.environment == "prod" ? 5000 : 2000
+        aggregate_key_type = "IP"
+      }
+    }
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.name_prefix}-rate-limit"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  rule {
+    name     = "GeoBlockRule"
+    priority = 5
+    action { block {} }
+    statement {
+      geo_match_statement {
+        country_codes = var.waf_blocked_countries
+      }
+    }
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.name_prefix}-geo-block"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  visibility_config {
+    cloudwatch_metrics_enabled = true
+    metric_name                = "${local.name_prefix}-waf"
+    sampled_requests_enabled   = true
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_wafv2_web_acl_association" "alb" {
+  provider     = aws.primary
+  resource_arn = module.alb.arn
+  web_acl_arn  = aws_wafv2_web_acl.main.arn
+}
+
+resource "aws_wafv2_web_acl_logging_configuration" "main" {
+  provider                = aws.primary
