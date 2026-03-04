@@ -243,3 +243,48 @@ resource "aws_cloudwatch_dashboard" "main" {
         y      = 0
         width  = 24
         height = 1
+        properties = {
+          markdown = "# ${var.project_name} - ${upper(var.environment)} Dashboard"
+        }
+      },
+      {
+        type   = "metric"
+        x      = 0
+        y      = 1
+        width  = 8
+        height = 6
+        properties = {
+          title  = "ALB Request Count"
+          region = var.primary_region
+          period = 60
+          stat   = "Sum"
+          metrics = [
+            ["AWS/ApplicationELB", "RequestCount", "LoadBalancer", module.alb.arn_suffix],
+            [".", "HTTPCode_Target_2XX_Count", ".", "."],
+            [".", "HTTPCode_Target_4XX_Count", ".", "."],
+            [".", "HTTPCode_Target_5XX_Count", ".", "."],
+          ]
+        }
+      },
+      {
+        type   = "metric"
+        x      = 8
+        y      = 1
+        width  = 8
+        height = 6
+        properties = {
+          title  = "ALB Response Time (p50, p95, p99)"
+          region = var.primary_region
+          period = 60
+          metrics = [
+            ["AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", module.alb.arn_suffix, { stat = "p50" }],
+            ["...", { stat = "p95" }],
+            ["...", { stat = "p99" }],
+          ]
+        }
+      },
+      {
+        type   = "metric"
+        x      = 16
+        y      = 1
+        width  = 8
