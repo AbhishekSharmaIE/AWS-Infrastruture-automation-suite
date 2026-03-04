@@ -73,3 +73,73 @@ resource "aws_cloudwatch_metric_alarm" "aurora_cpu" {
   metric_name         = "CPUUtilization"
   namespace           = "AWS/RDS"
   period              = 300
+  statistic           = "Average"
+  threshold           = 80
+  alarm_description   = "Aurora CPU utilization exceeds 80%"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  ok_actions          = [aws_sns_topic.alerts.arn]
+
+  dimensions = {
+    DBClusterIdentifier = module.aurora_primary.cluster_id
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "aurora_connections" {
+  provider            = aws.primary
+  alarm_name          = "${local.name_prefix}-aurora-connections"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "DatabaseConnections"
+  namespace           = "AWS/RDS"
+  period              = 300
+  statistic           = "Average"
+  threshold           = var.environment == "prod" ? 500 : 100
+  alarm_description   = "Aurora connection count high"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+
+  dimensions = {
+    DBClusterIdentifier = module.aurora_primary.cluster_id
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "aurora_replica_lag" {
+  provider            = aws.primary
+  alarm_name          = "${local.name_prefix}-aurora-replica-lag"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 3
+  metric_name         = "AuroraReplicaLag"
+  namespace           = "AWS/RDS"
+  period              = 60
+  statistic           = "Maximum"
+  threshold           = 100
+  alarm_description   = "Aurora replica lag exceeds 100ms"
+  alarm_actions       = [aws_sns_topic.critical.arn]
+
+  dimensions = {
+    DBClusterIdentifier = module.aurora_primary.cluster_id
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "redis_cpu" {
+  provider            = aws.primary
+  alarm_name          = "${local.name_prefix}-redis-cpu"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 3
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/ElastiCache"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 75
+  alarm_description   = "Redis CPU utilization high"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+
+  dimensions = {
+    ReplicationGroupId = aws_elasticache_replication_group.main.id
+  }
+
