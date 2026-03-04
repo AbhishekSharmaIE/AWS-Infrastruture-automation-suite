@@ -1,0 +1,48 @@
+# Terraform
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/tfplan
+terraform/*.tfstate
+terraform/*.tfstate.backup
+terraform/*.tfplan
+**/.terraform/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+
+# Logs
+logs/
+*.log
+deploy_*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets - NEVER commit these
+*.pem
+*.key
+.env
+.env.*
+credentials.json
+secrets.yaml
+terraform.tfvars.local
+
+# Build artifacts
+*.zip
+*.tar.gz
