@@ -143,3 +143,48 @@ resource "aws_cloudwatch_metric_alarm" "redis_cpu" {
     ReplicationGroupId = aws_elasticache_replication_group.main.id
   }
 
+  tags = local.common_tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "redis_memory" {
+  provider            = aws.primary
+  alarm_name          = "${local.name_prefix}-redis-memory"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "DatabaseMemoryUsagePercentage"
+  namespace           = "AWS/ElastiCache"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 80
+  alarm_description   = "Redis memory usage exceeds 80%"
+  alarm_actions       = [aws_sns_topic.critical.arn]
+
+  dimensions = {
+    ReplicationGroupId = aws_elasticache_replication_group.main.id
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "eks_node_cpu" {
+  provider            = aws.primary
+  alarm_name          = "${local.name_prefix}-eks-node-cpu"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 3
+  metric_name         = "node_cpu_utilization"
+  namespace           = "ContainerInsights"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 80
+  alarm_description   = "EKS node CPU utilization high"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+
+  dimensions = {
+    ClusterName = module.eks.cluster_name
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "eks_node_memory" {
+  provider            = aws.primary
