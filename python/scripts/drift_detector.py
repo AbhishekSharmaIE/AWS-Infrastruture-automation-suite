@@ -218,3 +218,79 @@ class DriftDetector:
         return counts
 
     def print_results(self, results: list[DriftResult]):
+        if not results:
+            console.print(Panel("[green]No drift detected[/green]", title="Drift Report"))
+            return
+
+        table = Table(title=f"Drift Report - {self.project}/{self.environment}")
+        table.add_column("Severity", style="bold")
+        table.add_column("Type")
+        table.add_column("Resource")
+        table.add_column("Drift")
+        table.add_column("Details")
+
+        severity_styles = {
+            "critical": "[bold red]CRITICAL[/bold red]",
+            "high":     "[red]HIGH[/red]",
+            "medium":   "[yellow]MEDIUM[/yellow]",
+            "low":      "[dim]LOW[/dim]",
+        }
+
+        for r in sorted(results, key=lambda x: ["critical", "high", "medium", "low"].index(x.severity)):
+            table.add_row(
+                severity_styles.get(r.severity, r.severity),
+                r.resource_type,
+                r.resource_id[:40],
+                r.drift_type,
+                r.details[:60],
+            )
+
+        console.print(table)
+
+        counts = self._count_by_severity(results)
+        summary = " | ".join(f"{k}: {v}" for k, v in counts.items() if v > 0)
+        console.print(f"\n[bold]Summary:[/bold] {summary}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Infrastructure Drift Detector")
+    parser.add_argument("--project", required=True)
+    parser.add_argument("--env", required=True)
+    parser.add_argument("--security-only", action="store_true", help="Only check security drift")
+    parser.add_argument("--terraform-only", action="store_true", help="Only check Terraform drift")
+    parser.add_argument("--json", action="store_true", help="Output as JSON")
+    parser.add_argument("--publish", action="store_true", help="Publish metrics to CloudWatch")
+    args = parser.parse_args()
+
+    detector = DriftDetector(args.project, args.env)
+
+    results = []
+    if not args.security_only:
+        console.print("[cyan]Detecting Terraform drift...[/cyan]")
+        results.extend(detector.detect_terraform_drift())
+
+    if not args.terraform_only:
+        console.print("[cyan]Detecting security drift...[/cyan]")
+        results.extend(detector.detect_security_drift())
+
+    if args.json:
+        print(json.dumps([{
+            "resource_type": r.resource_type,
+            "resource_id": r.resource_id,
+            "drift_type": r.drift_type,
+            "details": r.details,
+            "severity": r.severity,
+        } for r in results], indent=2))
+    else:
+        detector.print_results(results)
+
+    if args.publish:
+        detector.publish_results(results)
+        console.print("[dim]Metrics published to CloudWatch[/dim]")
+
+    critical_or_high = [r for r in results if r.severity in ("critical", "high")]
+    return 1 if critical_or_high else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
