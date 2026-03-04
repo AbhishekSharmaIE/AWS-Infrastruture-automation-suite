@@ -213,3 +213,90 @@ class MultiRegionHealthChecker:
                 metric_data.append({
                     "MetricName": "ServiceLatency",
                     "Dimensions": [
+                        {"Name": "Region", "Value": r.region},
+                        {"Name": "Service", "Value": r.service},
+                    ],
+                    "Value": r.latency_ms,
+                    "Unit": "Milliseconds",
+                    "Timestamp": datetime.utcnow(),
+                })
+
+        for i in range(0, len(metric_data), 20):
+            batch = metric_data[i : i + 20]
+            cw.put_metric_data(
+                Namespace=f"Custom/{self.project}",
+                MetricData=batch,
+            )
+
+    def print_results(self, results: list[HealthResult]):
+        table = Table(title=f"Health Check - {self.project}/{self.environment}")
+        table.add_column("Region", style="cyan")
+        table.add_column("Service", style="white")
+        table.add_column("Status", style="bold")
+        table.add_column("Latency", justify="right")
+        table.add_column("Details")
+
+        for r in sorted(results, key=lambda x: (x.region, x.service)):
+            status_style = {
+                "healthy": "[green]healthy[/green]",
+                "degraded": "[yellow]degraded[/yellow]",
+                "unhealthy": "[red]unhealthy[/red]",
+            }.get(r.status, r.status)
+
+            latency = f"{r.latency_ms:.0f}ms" if r.latency_ms >= 0 else "N/A"
+            details_str = ", ".join(f"{k}={v}" for k, v in r.details.items() if k != "error")
+            if "error" in r.details:
+                details_str = f"[red]{r.details['error'][:60]}[/red]"
+
+            table.add_row(r.region, r.service, status_style, latency, details_str)
+
+        console.print(table)
+
+
+async def run(args):
+    endpoints = {}
+    if args.endpoints:
+        for ep in args.endpoints:
+            region, url = ep.split("=", 1)
+            endpoints[region] = url
+
+    checker = MultiRegionHealthChecker(args.project, args.env, endpoints)
+
+    while True:
+        results = await checker.check_all()
+        checker.print_results(results)
+
+        if not args.json_only:
+            try:
+                checker.publish_metrics(results)
+                console.print("[dim]Metrics published to CloudWatch[/dim]")
+            except Exception as e:
+                console.print(f"[yellow]Failed to publish metrics: {e}[/yellow]")
+
+        if args.json_output:
+            print(json.dumps([asdict(r) for r in results], indent=2, default=str))
+
+        if not args.continuous:
+            unhealthy = [r for r in results if r.status == "unhealthy"]
+            return 1 if unhealthy else 0
+
+        await asyncio.sleep(args.interval)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Multi-region infrastructure health checker")
+    parser.add_argument("--project", required=True, help="Project name")
+    parser.add_argument("--env", required=True, help="Environment")
+    parser.add_argument("--endpoint", dest="endpoints", action="append",
+                        help="region=url pairs for API health checks")
+    parser.add_argument("--continuous", action="store_true", help="Run continuously")
+    parser.add_argument("--interval", type=int, default=60, help="Seconds between checks (continuous mode)")
+    parser.add_argument("--json-output", action="store_true", help="Also output JSON")
+    parser.add_argument("--json-only", action="store_true", help="Skip CloudWatch metric publishing")
+    args = parser.parse_args()
+
+    return asyncio.run(run(args))
+
+
+if __name__ == "__main__":
+    exit(main() or 0)
