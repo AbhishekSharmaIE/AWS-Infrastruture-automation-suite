@@ -208,3 +208,93 @@ module "eks" {
     coredns = {
       most_recent = true
       configuration_values = jsonencode({
+        computeType = "Fargate"
+      })
+    }
+    kube-proxy = {
+      most_recent = true
+    }
+    vpc-cni = {
+      most_recent    = true
+      before_compute = true
+      configuration_values = jsonencode({
+        env = { ENABLE_PREFIX_DELEGATION = "true" }
+      })
+    }
+    aws-ebs-csi-driver = {
+      most_recent = true
+    }
+    aws-efs-csi-driver = {
+      most_recent = true
+    }
+  }
+
+  eks_managed_node_groups = {
+    general = {
+      name           = "${local.name_prefix}-general"
+      instance_types = var.eks_on_demand_instance_types
+      capacity_type  = "ON_DEMAND"
+      min_size       = var.eks_min_size
+      max_size       = var.eks_max_size
+      desired_size   = var.eks_desired_size
+      disk_size      = 100
+
+      labels = {
+        role        = "general"
+        environment = var.environment
+      }
+
+      update_config = {
+        max_unavailable_percentage = 33
+      }
+    }
+
+    spot = {
+      name           = "${local.name_prefix}-spot"
+      instance_types = var.eks_spot_instance_types
+      capacity_type  = "SPOT"
+      min_size       = 0
+      max_size       = 30
+      desired_size   = var.environment == "prod" ? 3 : 0
+      disk_size      = 50
+
+      labels = {
+        role        = "spot"
+        environment = var.environment
+      }
+
+      taints = [{
+        key    = "spot"
+        value  = "true"
+        effect = "NO_SCHEDULE"
+      }]
+    }
+
+    memory_optimized = {
+      name           = "${local.name_prefix}-mem"
+      instance_types = ["r6i.xlarge", "r6i.2xlarge"]
+      capacity_type  = "ON_DEMAND"
+      min_size       = 0
+      max_size       = 10
+      desired_size   = 0
+      disk_size      = 200
+
+      labels = {
+        role = "memory-optimized"
+      }
+    }
+  }
+
+  tags = local.common_tags
+}
+
+# ─── RDS Aurora Global ────────────────────────────────────────────────────────
+
+resource "aws_rds_global_cluster" "main" {
+  provider                  = aws.primary
+  global_cluster_identifier = "${local.name_prefix}-global"
+  engine                    = "aurora-postgresql"
+  engine_version            = var.aurora_engine_version
+  database_name             = var.database_name
+  storage_encrypted         = true
+  deletion_protection       = var.environment == "prod"
