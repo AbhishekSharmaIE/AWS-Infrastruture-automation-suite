@@ -193,3 +193,61 @@ def handle_redis_memory(message: dict):
         },
     )
 
+
+def cleanup_ecr_images(message: dict):
+    """Apply aggressive lifecycle policies to ECR repos to free disk."""
+    ecr = boto3.client("ecr")
+    repos = ecr.describe_repositories()["repositories"]
+
+    for repo in repos:
+        if PROJECT not in repo["repositoryName"]:
+            continue
+        try:
+            ecr.put_lifecycle_policy(
+                repositoryName=repo["repositoryName"],
+                lifecyclePolicyText=json.dumps({
+                    "rules": [
+                        {
+                            "rulePriority": 1,
+                            "description": "Remove untagged images",
+                            "selection": {
+                                "tagStatus": "untagged",
+                                "countType": "imageCountMoreThan",
+                                "countNumber": 3,
+                            },
+                            "action": {"type": "expire"},
+                        },
+                        {
+                            "rulePriority": 2,
+                            "description": "Keep only last 20 tagged images",
+                            "selection": {
+                                "tagStatus": "any",
+                                "countType": "imageCountMoreThan",
+                                "countNumber": 20,
+                            },
+                            "action": {"type": "expire"},
+                        },
+                    ]
+                }),
+            )
+            log.info(f"Lifecycle policy applied to: {repo['repositoryName']}")
+        except Exception as e:
+            log.error(f"Failed to update lifecycle for {repo['repositoryName']}: {e}")
+
+
+def handle_high_error_rate(message: dict):
+    """High 5XX error rate detected - log and notify for investigation."""
+    log.info("High 5XX error rate detected")
+    _notify(
+        "High 5XX Error Rate Alert",
+        {
+            "message": "ALB is seeing elevated 5XX error rates. Investigate:",
+            "steps": [
+                "Check EKS pod health: kubectl get pods -A",
+                "Review recent deployments",
+                "Check Aurora connection limits",
+                "Review application logs in CloudWatch",
+            ],
+            "alarm_details": message,
+        },
+    )
