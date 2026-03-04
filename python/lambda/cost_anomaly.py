@@ -73,3 +73,86 @@ def handler(event, context):
     if anomalies:
         log.warning(f"Detected {len(anomalies)} cost anomalies")
         _send_alert(anomalies, yesterday_cost, baseline_daily)
+    else:
+        log.info("No cost anomalies detected")
+
+    return {
+        "statusCode": 200,
+        "anomalies_detected": len(anomalies),
+        "yesterday_cost": yesterday_cost,
+        "baseline_daily": baseline_daily,
+    }
+
+
+def _get_daily_cost(ce, start, end) -> float:
+    resp = ce.get_cost_and_usage(
+        TimePeriod={"Start": str(start), "End": str(end)},
+        Granularity="DAILY",
+        Metrics=["UnblendedCost"],
+        Filter={"Tags": {"Key": "Project", "Values": [PROJECT]}},
+    )
+    total = 0.0
+    for result in resp.get("ResultsByTime", []):
+        total += float(result["Total"]["UnblendedCost"]["Amount"])
+    return total
+
+
+def _get_average_daily_cost(ce, start, end) -> float:
+    days = (end - start).days
+    if days <= 0:
+        return 0.0
+    total = _get_daily_cost(ce, start, end)
+    return total / days
+
+
+def _get_cost_by_service(ce, start, end) -> dict[str, float]:
+    resp = ce.get_cost_and_usage(
+        TimePeriod={"Start": str(start), "End": str(end)},
+        Granularity="DAILY",
+        Metrics=["UnblendedCost"],
+        Filter={"Tags": {"Key": "Project", "Values": [PROJECT]}},
+        GroupBy=[{"Type": "DIMENSION", "Key": "SERVICE"}],
+    )
+    services = {}
+    for result in resp.get("ResultsByTime", []):
+        for group in result.get("Groups", []):
+            svc = group["Keys"][0]
+            cost = float(group["Metrics"]["UnblendedCost"]["Amount"])
+            services[svc] = services.get(svc, 0) + cost
+    return services
+
+
+def _send_alert(anomalies: list, yesterday: float, baseline: float):
+    if not ALERTS_TOPIC_ARN:
+        log.warning("No ALERTS_TOPIC_ARN set, skipping notification")
+        return
+
+    lines = [
+        f"Cost Anomaly Alert - {PROJECT} ({ENVIRONMENT})",
+        f"Date: {datetime.utcnow().strftime('%Y-%m-%d')}",
+        f"Yesterday's spend: ${yesterday:,.2f}",
+        f"7-day daily average: ${baseline:,.2f}",
+        "",
+        f"Anomalies detected: {len(anomalies)}",
+        "",
+    ]
+
+    for a in anomalies:
+        if a["type"] == "daily_spend_spike":
+            lines.append(
+                f"DAILY SPEND SPIKE: ${a['yesterday']:,.2f} vs "
+                f"${a['baseline']:,.2f} baseline (+{a['pct_change']:.1f}%)"
+            )
+        elif a["type"] == "service_cost_spike":
+            lines.append(
+                f"SERVICE SPIKE [{a['service']}]: ${a['yesterday']:,.2f} vs "
+                f"${a['daily_baseline']:,.2f} baseline (+{a['pct_change']:.1f}%)"
+            )
+
+    sns = boto3.client("sns")
+    sns.publish(
+        TopicArn=ALERTS_TOPIC_ARN,
+        Subject=f"Cost Anomaly: {PROJECT} - ${yesterday:,.2f} (+{((yesterday - baseline) / max(baseline, 0.01)) * 100:.0f}%)"[:100],
+        Message="\n".join(lines),
+    )
+    log.info("Cost anomaly alert sent")
