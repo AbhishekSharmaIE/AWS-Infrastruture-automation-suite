@@ -48,3 +48,48 @@ logging.basicConfig(
     ],
 )
 log = logging.getLogger("aws-infra-deploy")
+
+VALID_ENVIRONMENTS = ["dev", "staging", "prod"]
+REGIONS = {
+    "dev":     {"primary": "us-east-1", "secondary": "us-west-2"},
+    "staging": {"primary": "us-east-1", "secondary": "us-west-2"},
+    "prod":    {"primary": "us-east-1", "secondary": "eu-west-1"},
+}
+
+
+@dataclass
+class DeployConfig:
+    project_name: str
+    environment: str
+    action: str
+    primary_region: str = "us-east-1"
+    secondary_region: str = "us-west-2"
+    auto_approve: bool = False
+    skip_validation: bool = False
+    dry_run: bool = False
+    extra_vars: dict = field(default_factory=dict)
+    working_dir: Path = Path("terraform")
+
+
+# ─── Pre-flight Validation ─────────────────────────────────────────────────────
+
+class PreFlightValidator:
+    """Validates all prerequisites before a deployment can proceed."""
+
+    def __init__(self, config: DeployConfig):
+        self.config = config
+        self.errors: list[str] = []
+        self.warnings: list[str] = []
+
+    def run_all(self) -> bool:
+        checks = [
+            ("AWS Credentials", self._check_aws_credentials),
+            ("Terraform Version", self._check_terraform_version),
+            ("Required Tools", self._check_required_tools),
+            ("Environment Variables", self._check_environment_vars),
+            ("State Backend", self._check_state_backend),
+            ("Tfvars File", self._check_tfvars_file),
+        ]
+
+        with Progress(
+            SpinnerColumn(), TextColumn("[progress.description]{task.description}"),
