@@ -1,0 +1,60 @@
+name: Infrastructure CI/CD
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'terraform/**'
+      - 'python/**'
+      - '.github/workflows/terraform.yaml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'terraform/**'
+      - 'python/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options: [dev, staging, prod]
+      action:
+        description: 'Terraform action'
+        required: true
+        type: choice
+        options: [plan, apply, destroy]
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+env:
+  TF_VERSION: "1.7.0"
+  AWS_REGION: "us-east-1"
+  PROJECT_NAME: "myproject"
+
+jobs:
+  # ─── Lint & Validate ───────────────────────────────────────────────────────
+
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+        working-directory: terraform
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
