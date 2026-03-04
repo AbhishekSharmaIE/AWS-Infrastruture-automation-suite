@@ -1,0 +1,12 @@
+# Default owner for everything
+* @platform-team
+
+# Terraform changes require infra review
+/terraform/ @infra-team @platform-team
+
+# Security-sensitive files
+/cloudformation/iam-roles.yaml @security-team
+/terraform/main.tf @infra-team @security-team
+
+# CI/CD pipeline changes
+/.github/ @platform-team @devops-lead
