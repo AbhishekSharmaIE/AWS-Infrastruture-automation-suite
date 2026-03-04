@@ -348,3 +348,33 @@ module "aurora_primary" {
 
 module "aurora_secondary" {
   source  = "terraform-aws-modules/rds-aurora/aws"
+  version = "~> 9.0"
+  providers = { aws = aws.secondary }
+
+  name           = "${local.name_prefix}-aurora-secondary"
+  engine         = "aurora-postgresql"
+  engine_version = var.aurora_engine_version
+  instance_class = var.aurora_reader_class
+  instances      = { reader-1 = {} }
+
+  global_cluster_identifier = aws_rds_global_cluster.main.id
+  is_primary_cluster        = false
+  source_region             = var.primary_region
+
+  vpc_id               = module.vpc_secondary.vpc_id
+  db_subnet_group_name = module.vpc_secondary.database_subnet_group_name
+  security_group_rules = {
+    ingress_from_vpc = {
+      cidr_blocks = [var.secondary_vpc_cidr]
+    }
+  }
+
+  storage_encrypted = true
+
+  depends_on = [module.aurora_primary]
+  tags       = local.common_tags
+}
+
+# ─── ElastiCache Redis ────────────────────────────────────────────────────────
+
+resource "random_password" "redis_auth" {
