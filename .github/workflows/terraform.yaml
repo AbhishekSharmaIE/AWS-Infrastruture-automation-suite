@@ -173,3 +173,50 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Deploy
+        run: |
+          python3 python/deploy.py apply \
+            --project ${{ env.PROJECT_NAME }} \
+            --env ${{ github.event.inputs.environment || 'dev' }} \
+            --auto-approve \
+            --skip-validation
+
+  # ─── Cost Report (scheduled) ───────────────────────────────────────────────
+
+  cost-report:
+    name: Daily Cost Report
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Generate Cost Report
+        run: |
+          python3 python/scripts/cost_reporter.py \
+            --project ${{ env.PROJECT_NAME }} \
+            --env prod \
+            --period daily
