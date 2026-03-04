@@ -1,0 +1,75 @@
+# ─── CloudWatch Alarms ─────────────────────────────────────────────────────────
+
+resource "aws_cloudwatch_metric_alarm" "alb_5xx" {
+  provider            = aws.primary
+  alarm_name          = "${local.name_prefix}-alb-5xx"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "HTTPCode_Target_5XX_Count"
+  namespace           = "AWS/ApplicationELB"
+  period              = 60
+  statistic           = "Sum"
+  threshold           = 50
+  alarm_description   = "ALB target 5XX errors exceeded threshold"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  ok_actions          = [aws_sns_topic.alerts.arn]
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    LoadBalancer = module.alb.arn_suffix
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "alb_latency" {
+  provider            = aws.primary
+  alarm_name          = "${local.name_prefix}-alb-latency"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 3
+  metric_name         = "TargetResponseTime"
+  namespace           = "AWS/ApplicationELB"
+  period              = 60
+  extended_statistic  = "p99"
+  threshold           = 5
+  alarm_description   = "ALB p99 latency exceeds 5 seconds"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    LoadBalancer = module.alb.arn_suffix
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "alb_unhealthy_hosts" {
+  provider            = aws.primary
+  alarm_name          = "${local.name_prefix}-unhealthy-hosts"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "UnHealthyHostCount"
+  namespace           = "AWS/ApplicationELB"
+  period              = 60
+  statistic           = "Maximum"
+  threshold           = 0
+  alarm_description   = "Unhealthy targets detected behind ALB"
+  alarm_actions       = [aws_sns_topic.critical.arn]
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    LoadBalancer  = module.alb.arn_suffix
+    TargetGroup   = module.alb.target_groups["app"].arn_suffix
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "aurora_cpu" {
+  provider            = aws.primary
+  alarm_name          = "${local.name_prefix}-aurora-cpu"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 3
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/RDS"
+  period              = 300
