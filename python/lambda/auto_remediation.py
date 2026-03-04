@@ -138,3 +138,58 @@ def scale_out_aurora(message: dict):
 
     instance_id = f"{cluster_id}-auto-{int(time.time())}"
     rds.create_db_instance(
+        DBInstanceIdentifier=instance_id,
+        DBInstanceClass="db.r7g.large",
+        Engine="aurora-postgresql",
+        DBClusterIdentifier=cluster_id,
+        Tags=[
+            {"Key": "AutoCreated", "Value": "true"},
+            {"Key": "Project", "Value": PROJECT},
+            {"Key": "Environment", "Value": ENVIRONMENT},
+        ],
+    )
+    log.info(f"Aurora read replica creation initiated: {instance_id}")
+
+
+def restart_unhealthy_pods(message: dict):
+    """Trigger a rolling instance refresh on EKS node groups."""
+    eks = boto3.client("eks")
+    asg = boto3.client("autoscaling")
+    cluster_name = f"{PROJECT}-{ENVIRONMENT}"
+
+    node_groups = eks.list_nodegroups(clusterName=cluster_name)["nodegroups"]
+    for ng in node_groups:
+        try:
+            ng_detail = eks.describe_nodegroup(clusterName=cluster_name, nodegroupName=ng)
+            asg_groups = ng_detail["nodegroup"]["resources"]["autoScalingGroups"]
+            for asg_entry in asg_groups:
+                asg.start_instance_refresh(
+                    AutoScalingGroupName=asg_entry["name"],
+                    Strategy="Rolling",
+                    Preferences={
+                        "MinHealthyPercentage": 75,
+                        "InstanceWarmup": 300,
+                    },
+                )
+                log.info(f"Instance refresh started for ASG: {asg_entry['name']}")
+        except Exception as e:
+            log.error(f"Failed to refresh node group {ng}: {e}")
+
+
+def handle_redis_memory(message: dict):
+    """Redis memory is high - publish alert for manual intervention."""
+    log.info("Redis memory alert - manual intervention may be required")
+    _notify(
+        "Redis Memory Alert - Review Required",
+        {
+            "message": "Redis memory usage is high. Consider:",
+            "actions": [
+                "Review key expiration policies",
+                "Check for memory leaks in application",
+                "Consider scaling to larger instance type",
+                "Run MEMORY DOCTOR for recommendations",
+            ],
+            "alarm_details": message,
+        },
+    )
+
