@@ -288,3 +288,33 @@ resource "aws_cloudwatch_dashboard" "main" {
         x      = 16
         y      = 1
         width  = 8
+        height = 6
+        properties = {
+          title  = "Healthy / Unhealthy Targets"
+          region = var.primary_region
+          period = 60
+          stat   = "Average"
+          metrics = [
+            ["AWS/ApplicationELB", "HealthyHostCount", "TargetGroup", module.alb.target_groups["app"].arn_suffix, "LoadBalancer", module.alb.arn_suffix],
+            [".", "UnHealthyHostCount", ".", ".", ".", "."],
+          ]
+        }
+      },
+      {
+        type   = "metric"
+        x      = 0
+        y      = 7
+        width  = 8
+        height = 6
+        properties = {
+          title  = "Aurora CPU Utilization"
+          region = var.primary_region
+          period = 300
+          stat   = "Average"
+          metrics = [
+            ["AWS/RDS", "CPUUtilization", "DBClusterIdentifier", module.aurora_primary.cluster_id],
+          ]
+        }
+      },
+      {
+        type   = "metric"
