@@ -568,3 +568,113 @@ module "alb" {
     all = { ip_protocol = "-1", cidr_ipv4 = var.primary_vpc_cidr }
   }
 
+  listeners = {
+    http_redirect = {
+      port     = 80
+      protocol = "HTTP"
+      redirect = {
+        port        = "443"
+        protocol    = "HTTPS"
+        status_code = "HTTP_301"
+      }
+    }
+    https = {
+      port            = 443
+      protocol        = "HTTPS"
+      certificate_arn = module.acm.acm_certificate_arn
+      ssl_policy      = "ELBSecurityPolicy-TLS13-1-2-2021-06"
+      forward = {
+        target_group_key = "app"
+      }
+    }
+  }
+
+  target_groups = {
+    app = {
+      name             = "${local.name_prefix}-app"
+      protocol         = "HTTP"
+      port             = 8080
+      target_type      = "ip"
+      create_attachment = false
+
+      health_check = {
+        path                = "/health"
+        healthy_threshold   = 2
+        unhealthy_threshold = 3
+        interval            = 30
+        timeout             = 10
+        matcher             = "200-299"
+      }
+
+      stickiness = {
+        enabled  = true
+        type     = "lb_cookie"
+        duration = 86400
+      }
+    }
+  }
+
+  tags = local.common_tags
+}
+
+# ─── WAF ──────────────────────────────────────────────────────────────────────
+
+resource "aws_wafv2_web_acl" "main" {
+  provider    = aws.primary
+  name        = local.name_prefix
+  description = "WAF for ${var.project_name} ${var.environment}"
+  scope       = "REGIONAL"
+
+  default_action { allow {} }
+
+  rule {
+    name     = "AWSManagedRulesCommonRuleSet"
+    priority = 1
+    override_action { none {} }
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesCommonRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.name_prefix}-common-rules"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  rule {
+    name     = "AWSManagedRulesKnownBadInputsRuleSet"
+    priority = 2
+    override_action { none {} }
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesKnownBadInputsRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.name_prefix}-bad-inputs"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  rule {
+    name     = "AWSManagedRulesSQLiRuleSet"
+    priority = 3
+    override_action { none {} }
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesSQLiRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.name_prefix}-sqli"
+      sampled_requests_enabled   = true
+    }
+  }
+
