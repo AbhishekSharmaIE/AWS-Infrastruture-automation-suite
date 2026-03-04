@@ -1,0 +1,3 @@
+minimum_severity: MEDIUM
+exclude:
+  - aws-vpc-no-public-ingress-sgr
