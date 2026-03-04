@@ -188,3 +188,113 @@ class PreFlightValidator:
         for warn in self.warnings:
             table.add_row("[yellow]WARN[/yellow]", warn)
         if not self.errors and not self.warnings:
+            table.add_row("[green]PASS[/green]", "All pre-flight checks passed")
+
+        console.print(table)
+
+
+# ─── Terraform Runner ──────────────────────────────────────────────────────────
+
+class TerraformRunner:
+    """Executes Terraform commands with streaming output and error handling."""
+
+    def __init__(self, config: DeployConfig):
+        self.config = config
+        self.env = self._build_env()
+
+    def _build_env(self) -> dict:
+        env = os.environ.copy()
+        env.update({
+            "TF_VAR_project_name":     self.config.project_name,
+            "TF_VAR_environment":      self.config.environment,
+            "TF_VAR_primary_region":   self.config.primary_region,
+            "TF_VAR_secondary_region": self.config.secondary_region,
+            "TF_IN_AUTOMATION":        "1",
+            "TF_INPUT":                "0",
+        })
+        for k, v in self.config.extra_vars.items():
+            env[f"TF_VAR_{k}"] = str(v)
+        return env
+
+    def init(self) -> int:
+        log.info("Initializing Terraform...")
+        try:
+            sts = boto3.client("sts", region_name=self.config.primary_region)
+            account_id = sts.get_caller_identity()["Account"]
+        except Exception:
+            account_id = "UNKNOWN"
+
+        bucket = f"tfstate-{self.config.project_name}-{self.config.environment}-{account_id}"
+
+        return self._run([
+            "terraform", "init",
+            f"-backend-config=bucket={bucket}",
+            f"-backend-config=region={self.config.primary_region}",
+            f"-backend-config=key={self.config.environment}/terraform.tfstate",
+            "-backend-config=encrypt=true",
+            f"-backend-config=dynamodb_table=terraform-locks-{self.config.project_name}-{self.config.environment}",
+            "-upgrade",
+        ])
+
+    def validate(self) -> int:
+        log.info("Validating configuration...")
+        return self._run(["terraform", "validate"])
+
+    def plan(self, plan_file: str = "tfplan") -> int:
+        log.info("Generating Terraform plan...")
+        cmd = ["terraform", "plan", f"-out={plan_file}", "-detailed-exitcode"]
+
+        tfvars = (
+            self.config.working_dir
+            / "environments"
+            / self.config.environment
+            / "terraform.tfvars"
+        )
+        if tfvars.exists():
+            cmd.append(f"-var-file={tfvars}")
+
+        return self._run(cmd)
+
+    def apply(self, plan_file: str = "tfplan") -> int:
+        log.info("Applying Terraform plan...")
+        plan_path = self.config.working_dir / plan_file
+        if plan_path.exists():
+            return self._run(["terraform", "apply", plan_file])
+
+        cmd = ["terraform", "apply", "-auto-approve"]
+        tfvars = (
+            self.config.working_dir
+            / "environments"
+            / self.config.environment
+            / "terraform.tfvars"
+        )
+        if tfvars.exists():
+            cmd.append(f"-var-file={tfvars}")
+
+        return self._run(cmd)
+
+    def destroy(self) -> int:
+        if self.config.environment == "prod":
+            console.print(Panel(
+                "[bold red]DANGER: Destroying PRODUCTION infrastructure![/bold red]\n\n"
+                "This action is irreversible.\n"
+                "Type 'destroy-prod' to confirm:",
+                style="red",
+            ))
+            confirm = input().strip()
+            if confirm != "destroy-prod":
+                log.info("Destruction cancelled by user.")
+                return 1
+
+        cmd = ["terraform", "destroy", "-auto-approve"]
+        tfvars = (
+            self.config.working_dir
+            / "environments"
+            / self.config.environment
+            / "terraform.tfvars"
+        )
+        if tfvars.exists():
+            cmd.append(f"-var-file={tfvars}")
+
+        return self._run(cmd)
+
