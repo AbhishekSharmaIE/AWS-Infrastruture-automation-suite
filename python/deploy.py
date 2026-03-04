@@ -298,3 +298,73 @@ class TerraformRunner:
 
         return self._run(cmd)
 
+    def output(self) -> dict:
+        result = subprocess.run(
+            ["terraform", "output", "-json"],
+            capture_output=True, text=True,
+            cwd=self.config.working_dir, env=self.env,
+        )
+        if result.returncode == 0:
+            return json.loads(result.stdout)
+        return {}
+
+    def _run(self, cmd: list[str]) -> int:
+        log.info(f"Running: {' '.join(cmd)}")
+        start = time.time()
+        with subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            cwd=self.config.working_dir,
+            env=self.env,
+        ) as proc:
+            for line in proc.stdout:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+            proc.wait()
+
+        elapsed = time.time() - start
+        status = "succeeded" if proc.returncode == 0 else f"failed (exit {proc.returncode})"
+        log.info(f"Command {status} in {elapsed:.1f}s")
+        return proc.returncode
+
+
+# ─── Cost Estimator ────────────────────────────────────────────────────────────
+
+class CostEstimator:
+    """Estimates monthly infrastructure cost based on deployed resources."""
+
+    HOURLY_COSTS = {
+        "m6i.xlarge":      0.192,
+        "m6i.2xlarge":     0.384,
+        "m6i.4xlarge":     0.768,
+        "r7g.large":       0.1680,
+        "r7g.xlarge":      0.3360,
+        "r7g.2xlarge":     0.6720,
+        "cache.r7g.large": 0.166,
+        "cache.r7g.2xlarge": 0.332,
+    }
+
+    HOURS_PER_MONTH = 730
+
+    def estimate(self, environment: str) -> dict:
+        h = self.HOURS_PER_MONTH
+        profiles = {
+            "dev": {
+                "EKS Control Plane":         73.0,
+                "EKS Nodes (2x m6i.xlarge)": 2 * self.HOURLY_COSTS["m6i.xlarge"] * h,
+                "Aurora (1 writer)":         self.HOURLY_COSTS["r7g.large"] * h,
+                "ElastiCache (1 node)":      self.HOURLY_COSTS["cache.r7g.large"] * h,
+                "NAT Gateway (1x)":          45.0,
+                "ALB":                       25.0,
+                "Route53":                   2.0,
+                "CloudWatch":                20.0,
+                "S3 (state + logs)":         5.0,
+            },
+            "staging": {
+                "EKS Control Plane":         73.0,
+                "EKS Nodes (3x m6i.xlarge)": 3 * self.HOURLY_COSTS["m6i.xlarge"] * h,
+                "Aurora (writer + reader)":  2 * self.HOURLY_COSTS["r7g.large"] * h,
+                "ElastiCache (1 node)":      self.HOURLY_COSTS["cache.r7g.large"] * h,
+                "NAT Gateway (1x)":          45.0,
