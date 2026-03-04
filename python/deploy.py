@@ -468,3 +468,158 @@ class PostDeploySetup:
             "--namespace", "kube-system",
             "--set", f"autoDiscovery.clusterName={cluster_name}",
             "--set", f"awsRegion={self.config.primary_region}",
+        ], check=True, capture_output=True)
+
+    def _install_alb_controller(self):
+        cluster_name = self._get_output("eks_cluster_name")
+        subprocess.run([
+            "helm", "upgrade", "--install", "aws-load-balancer-controller",
+            "eks/aws-load-balancer-controller",
+            "--namespace", "kube-system",
+            "--set", f"clusterName={cluster_name}",
+            "--set", f"region={self.config.primary_region}",
+            "--set", "serviceAccount.create=true",
+        ], check=True, capture_output=True)
+
+    def _install_metrics_server(self):
+        subprocess.run([
+            "kubectl", "apply", "-f",
+            "https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml",
+        ], check=True, capture_output=True)
+
+    def _install_monitoring(self):
+        values_file = Path("kubernetes/monitoring/prometheus-values.yaml")
+        cmd = [
+            "helm", "upgrade", "--install", "kube-prometheus-stack",
+            "prometheus-community/kube-prometheus-stack",
+            "--namespace", "monitoring",
+            "--create-namespace",
+        ]
+        if values_file.exists():
+            cmd.extend(["--values", str(values_file)])
+        subprocess.run(cmd, check=True, capture_output=True)
+
+    def _enable_container_insights(self):
+        cluster_name = self._get_output("eks_cluster_name")
+        subprocess.run([
+            "aws", "eks", "create-addon",
+            "--cluster-name", cluster_name,
+            "--addon-name", "amazon-cloudwatch-observability",
+            "--region", self.config.primary_region,
+        ], capture_output=True)
+
+
+# ─── Main ──────────────────────────────────────────────────────────────────────
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="AWS Infrastructure Automation Suite - Deployment Orchestrator",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s plan    --project myproject --env dev
+  %(prog)s apply   --project myproject --env staging --auto-approve
+  %(prog)s destroy --project myproject --env dev
+  %(prog)s cost    --project myproject --env prod
+        """,
+    )
+    parser.add_argument("action", choices=["plan", "apply", "destroy", "validate", "cost"])
+    parser.add_argument("--project", required=True, help="Project name")
+    parser.add_argument("--env", required=True, choices=VALID_ENVIRONMENTS, help="Target environment")
+    parser.add_argument("--auto-approve", action="store_true", help="Skip interactive approval")
+    parser.add_argument("--skip-validation", action="store_true", help="Skip pre-flight checks")
+    parser.add_argument("--dry-run", action="store_true", help="Show what would happen without executing")
+    parser.add_argument("--var", action="append", default=[], help="Extra Terraform variables (key=value)")
+    args = parser.parse_args()
+
+    extra_vars = {}
+    for var in args.var:
+        if "=" in var:
+            k, v = var.split("=", 1)
+            extra_vars[k] = v
+
+    console.print(Panel.fit(
+        f"[bold blue]AWS Infrastructure Automation Suite[/bold blue]\n\n"
+        f"Project:     [cyan]{args.project}[/cyan]\n"
+        f"Environment: [yellow]{args.env}[/yellow]\n"
+        f"Action:      [green]{args.action}[/green]\n"
+        f"Region:      [white]{REGIONS[args.env]['primary']}[/white] / "
+        f"[white]{REGIONS[args.env]['secondary']}[/white]",
+    ))
+
+    config = DeployConfig(
+        project_name=args.project,
+        environment=args.env,
+        action=args.action,
+        primary_region=REGIONS[args.env]["primary"],
+        secondary_region=REGIONS[args.env]["secondary"],
+        auto_approve=args.auto_approve,
+        skip_validation=args.skip_validation,
+        dry_run=args.dry_run,
+        extra_vars=extra_vars,
+    )
+
+    CostEstimator().print_estimate(args.env)
+
+    if args.action == "cost":
+        return 0
+
+    if not args.skip_validation:
+        validator = PreFlightValidator(config)
+        if not validator.run_all():
+            console.print("[bold red]Pre-flight validation failed. Aborting.[/bold red]")
+            return 1
+
+    if args.dry_run:
+        console.print("[yellow]Dry run complete. No changes made.[/yellow]")
+        return 0
+
+    tf = TerraformRunner(config)
+
+    rc = tf.init()
+    if rc != 0:
+        console.print("[red]Terraform init failed[/red]")
+        return rc
+
+    if args.action == "validate":
+        return tf.validate()
+
+    rc = tf.validate()
+    if rc != 0:
+        console.print("[red]Terraform validation failed[/red]")
+        return rc
+
+    if args.action == "plan":
+        return tf.plan()
+
+    elif args.action == "apply":
+        rc = tf.plan()
+        if rc not in (0, 2):  # 2 = changes detected
+            return rc
+        if rc == 0:
+            console.print("[green]No changes detected. Infrastructure is up to date.[/green]")
+            return 0
+
+        if not args.auto_approve:
+            console.print("\n[bold]Apply the above plan? [y/N][/bold] ", end="")
+            if input().strip().lower() != "y":
+                console.print("[yellow]Apply cancelled.[/yellow]")
+                return 0
+
+        rc = tf.apply()
+        if rc == 0:
+            console.print(Panel("[bold green]Deployment complete![/bold green]"))
+            outputs = tf.output()
+            if outputs:
+                post = PostDeploySetup(config, outputs)
+                post.run()
+        return rc
+
+    elif args.action == "destroy":
+        return tf.destroy()
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
