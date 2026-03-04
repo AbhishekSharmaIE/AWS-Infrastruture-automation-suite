@@ -458,3 +458,28 @@ resource "aws_elasticache_replication_group" "main" {
   snapshot_retention_limit   = 7
   snapshot_window            = "03:00-04:00"
   maintenance_window         = "mon:04:00-mon:05:00"
+  notification_topic_arn     = aws_sns_topic.alerts.arn
+  engine_version             = "7.0"
+
+  log_delivery_configuration {
+    destination      = aws_cloudwatch_log_group.redis_slow.name
+    destination_type = "cloudwatch-logs"
+    log_format       = "json"
+    log_type         = "slow-log"
+  }
+
+  tags = local.common_tags
+}
+
+# ─── ACM Certificate ──────────────────────────────────────────────────────────
+
+module "acm" {
+  source  = "terraform-aws-modules/acm/aws"
+  version = "~> 5.0"
+  providers = { aws = aws.primary }
+
+  domain_name = var.domain_name
+  zone_id     = data.aws_route53_zone.main.zone_id
+
+  subject_alternative_names = [
+    "*.${var.domain_name}",
