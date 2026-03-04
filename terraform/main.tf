@@ -78,3 +78,23 @@ data "aws_region" "primary" {
 data "aws_route53_zone" "main" {
   provider = aws.primary
   name     = var.domain_name
+}
+
+# ─── VPC Primary ──────────────────────────────────────────────────────────────
+
+module "vpc_primary" {
+  source  = "terraform-aws-modules/vpc/aws"
+  version = "~> 5.0"
+  providers = { aws = aws.primary }
+
+  name = "${local.name_prefix}-primary"
+  cidr = var.primary_vpc_cidr
+  azs  = slice(data.aws_availability_zones.primary.names, 0, 3)
+
+  private_subnets  = var.primary_private_subnets
+  public_subnets   = var.primary_public_subnets
+  database_subnets = var.primary_database_subnets
+
+  enable_nat_gateway     = true
+  single_nat_gateway     = var.environment != "prod"
+  enable_dns_hostnames   = true
