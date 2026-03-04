@@ -188,3 +188,58 @@ resource "aws_cloudwatch_metric_alarm" "eks_node_cpu" {
 
 resource "aws_cloudwatch_metric_alarm" "eks_node_memory" {
   provider            = aws.primary
+  alarm_name          = "${local.name_prefix}-eks-node-memory"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 3
+  metric_name         = "node_memory_utilization"
+  namespace           = "ContainerInsights"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 80
+  alarm_description   = "EKS node memory utilization high"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+
+  dimensions = {
+    ClusterName = module.eks.cluster_name
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "waf_blocked_requests" {
+  provider            = aws.primary
+  alarm_name          = "${local.name_prefix}-waf-blocked"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  metric_name         = "BlockedRequests"
+  namespace           = "AWS/WAFV2"
+  period              = 300
+  statistic           = "Sum"
+  threshold           = 1000
+  alarm_description   = "WAF blocked requests spike"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    WebACL = aws_wafv2_web_acl.main.name
+    Rule   = "ALL"
+    Region = var.primary_region
+  }
+
+  tags = local.common_tags
+}
+
+# ─── CloudWatch Dashboard ─────────────────────────────────────────────────────
+
+resource "aws_cloudwatch_dashboard" "main" {
+  provider       = aws.primary
+  dashboard_name = local.name_prefix
+
+  dashboard_body = jsonencode({
+    widgets = [
+      {
+        type   = "text"
+        x      = 0
+        y      = 0
+        width  = 24
+        height = 1
