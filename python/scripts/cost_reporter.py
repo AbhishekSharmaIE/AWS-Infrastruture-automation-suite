@@ -133,3 +133,63 @@ class CostReporter:
             "100.0%",
             style="bold",
         )
+        console.print(table)
+
+        if report.get("forecast_monthly"):
+            console.print(
+                f"\n[bold]Monthly forecast:[/bold] "
+                f"[yellow]${report['forecast_monthly']:,.2f}[/yellow]"
+            )
+
+    def send_to_sns(self, report: dict, topic_arn: str):
+        sns = boto3.client("sns", region_name="us-east-1")
+
+        lines = [
+            f"AWS Cost Report - {report['project']} ({report['environment']})",
+            f"Period: {report['period']} ({report['start']} to {report['end']})",
+            "",
+            "Top Services:",
+        ]
+
+        for service, cost in report["services"][:10]:
+            lines.append(f"  {service}: ${cost:,.2f}")
+
+        lines.extend([
+            "",
+            f"TOTAL: ${report['total']:,.2f}",
+        ])
+
+        if report.get("forecast_monthly"):
+            lines.append(f"Monthly Forecast: ${report['forecast_monthly']:,.2f}")
+
+        sns.publish(
+            TopicArn=topic_arn,
+            Subject=f"Cost Report: {report['project']} - ${report['total']:,.2f}",
+            Message="\n".join(lines),
+        )
+        console.print(f"[green]Report sent to SNS topic[/green]")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="AWS Cost Reporter")
+    parser.add_argument("--project", required=True)
+    parser.add_argument("--env", required=True)
+    parser.add_argument("--period", choices=["daily", "weekly", "monthly"], default="monthly")
+    parser.add_argument("--sns-topic", help="SNS topic ARN to send report to")
+    parser.add_argument("--json", action="store_true", help="Output as JSON")
+    args = parser.parse_args()
+
+    reporter = CostReporter(args.project, args.env)
+    report = reporter.generate_report(args.period)
+
+    if args.json:
+        print(json.dumps(report, indent=2, default=str))
+    else:
+        reporter.print_report(report)
+
+    if args.sns_topic:
+        reporter.send_to_sns(report, args.sns_topic)
+
+
+if __name__ == "__main__":
+    main()
