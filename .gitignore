@@ -46,3 +46,14 @@ terraform.tfvars.local
 # Build artifacts
 *.zip
 *.tar.gz
+
+# Terraform plans
+*.tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
