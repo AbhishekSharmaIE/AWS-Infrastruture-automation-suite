@@ -78,3 +78,58 @@ class CostReporter:
             end = str(today)
 
         cost_data = self.get_cost_by_service(start, end)
+        forecast = self.get_cost_forecast()
+
+        service_totals = {}
+        for result in cost_data.get("ResultsByTime", []):
+            for group in result.get("Groups", []):
+                service = group["Keys"][0]
+                cost = float(group["Metrics"]["UnblendedCost"]["Amount"])
+                service_totals[service] = service_totals.get(service, 0) + cost
+
+        sorted_services = sorted(service_totals.items(), key=lambda x: x[1], reverse=True)
+
+        grand_total = sum(service_totals.values())
+
+        forecast_total = None
+        if "Total" in forecast:
+            forecast_total = float(forecast["Total"]["Amount"])
+
+        report = {
+            "project": self.project,
+            "environment": self.environment,
+            "period": period,
+            "start": start,
+            "end": end,
+            "services": sorted_services,
+            "total": grand_total,
+            "forecast_monthly": forecast_total,
+            "generated_at": datetime.utcnow().isoformat(),
+        }
+
+        return report
+
+    def print_report(self, report: dict):
+        console.print(Panel.fit(
+            f"[bold blue]AWS Cost Report[/bold blue]\n\n"
+            f"Project:     [cyan]{report['project']}[/cyan]\n"
+            f"Environment: [yellow]{report['environment']}[/yellow]\n"
+            f"Period:      {report['period']} ({report['start']} to {report['end']})",
+        ))
+
+        table = Table(title="Cost by Service")
+        table.add_column("Service", style="cyan")
+        table.add_column("Cost (USD)", style="green", justify="right")
+        table.add_column("% of Total", justify="right")
+
+        total = report["total"]
+        for service, cost in report["services"]:
+            pct = (cost / total * 100) if total > 0 else 0
+            table.add_row(service, f"${cost:,.2f}", f"{pct:.1f}%")
+
+        table.add_row(
+            "[bold]TOTAL[/bold]",
+            f"[bold yellow]${total:,.2f}[/bold yellow]",
+            "100.0%",
+            style="bold",
+        )
