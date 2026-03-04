@@ -1,0 +1,165 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  IAM roles for application workloads running on EKS.
+  Uses IRSA (IAM Roles for Service Accounts) for pod-level permissions.
+
+Parameters:
+  ProjectName:
+    Type: String
+  Environment:
+    Type: String
+    AllowedValues: [dev, staging, prod]
+  EksClusterOIDCProviderArn:
+    Type: String
+    Description: ARN of the EKS cluster OIDC provider
+  EksClusterOIDCProviderUrl:
+    Type: String
+    Description: URL of the EKS cluster OIDC provider (without https://)
+
+Resources:
+  # ─── Application Pod Role ───────────────────────────────────────────────────
+
+  AppPodRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-${Environment}-app-pod"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref EksClusterOIDCProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                !Sub "${EksClusterOIDCProviderUrl}:sub": !Sub "system:serviceaccount:${ProjectName}:app"
+                !Sub "${EksClusterOIDCProviderUrl}:aud": "sts.amazonaws.com"
+      Policies:
+        - PolicyName: AppPermissions
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: S3Access
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "arn:aws:s3:::${ProjectName}-${Environment}-*"
+                  - !Sub "arn:aws:s3:::${ProjectName}-${Environment}-*/*"
+              - Sid: SQSAccess
+                Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource:
+                  - !Sub "arn:aws:sqs:*:${AWS::AccountId}:${ProjectName}-${Environment}-*"
+              - Sid: SecretsManagerAccess
+                Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Sub "arn:aws:secretsmanager:*:${AWS::AccountId}:secret:${ProjectName}/${Environment}/*"
+              - Sid: KMSDecrypt
+                Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:GenerateDataKey
+                Resource: "*"
+                Condition:
+                  StringLike:
+                    "kms:ViaService":
+                      - !Sub "secretsmanager.*.amazonaws.com"
+                      - !Sub "s3.*.amazonaws.com"
+
+  # ─── Cluster Autoscaler Role ────────────────────────────────────────────────
+
+  ClusterAutoscalerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-${Environment}-cluster-autoscaler"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref EksClusterOIDCProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                !Sub "${EksClusterOIDCProviderUrl}:sub": "system:serviceaccount:kube-system:cluster-autoscaler"
+      Policies:
+        - PolicyName: ClusterAutoscaler
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - autoscaling:DescribeAutoScalingGroups
+                  - autoscaling:DescribeAutoScalingInstances
+                  - autoscaling:DescribeLaunchConfigurations
+                  - autoscaling:DescribeScalingActivities
+                  - autoscaling:DescribeTags
+                  - ec2:DescribeLaunchTemplateVersions
+                  - ec2:DescribeInstanceTypes
+                  - eks:DescribeNodegroup
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - autoscaling:SetDesiredCapacity
+                  - autoscaling:TerminateInstanceInAutoScalingGroup
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    "aws:ResourceTag/kubernetes.io/cluster/${ProjectName}-${Environment}": "owned"
+
+  # ─── External DNS Role ─────────────────────────────────────────────────────
+
+  ExternalDNSRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-${Environment}-external-dns"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref EksClusterOIDCProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                !Sub "${EksClusterOIDCProviderUrl}:sub": "system:serviceaccount:kube-system:external-dns"
+      Policies:
+        - PolicyName: ExternalDNS
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - route53:ChangeResourceRecordSets
+                Resource: "arn:aws:route53:::hostedzone/*"
+              - Effect: Allow
+                Action:
+                  - route53:ListHostedZones
+                  - route53:ListResourceRecordSets
+                  - route53:ListTagsForResource
+                Resource: "*"
+
+Outputs:
+  AppPodRoleArn:
+    Value: !GetAtt AppPodRole.Arn
+    Export:
+      Name: !Sub "${ProjectName}-${Environment}-app-pod-role"
+
+  ClusterAutoscalerRoleArn:
+    Value: !GetAtt ClusterAutoscalerRole.Arn
+    Export:
+      Name: !Sub "${ProjectName}-${Environment}-cluster-autoscaler-role"
+
+  ExternalDNSRoleArn:
+    Value: !GetAtt ExternalDNSRole.Arn
+    Export:
+      Name: !Sub "${ProjectName}-${Environment}-external-dns-role"
