@@ -10,14 +10,6 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.5"
     }
-    kubernetes = {
-      source  = "hashicorp/kubernetes"
-      version = "~> 2.23"
-    }
-    helm = {
-      source  = "hashicorp/helm"
-      version = "~> 2.11"
-    }
     tls = {
       source  = "hashicorp/tls"
       version = "~> 4.0"
@@ -25,10 +17,10 @@ terraform {
   }
 
   backend "s3" {
-    bucket         = "tfstate-YOURPROJECT-YOURENV"
-    key            = "global/terraform.tfstate"
+    bucket         = "tfstate-awsinfra-dev-216203951255"
+    key            = "dev/terraform.tfstate"
     region         = "us-east-1"
     encrypt        = true
-    dynamodb_table = "terraform-state-locks"
+    dynamodb_table = "terraform-locks-awsinfra-dev"
   }
 }
