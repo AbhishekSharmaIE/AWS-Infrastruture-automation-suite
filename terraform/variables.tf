@@ -80,7 +80,7 @@ variable "eks_max_size" {
 
 variable "aurora_engine_version" {
   type    = string
-  default = "15.4"
+  default = "16.6"
 }
 
 variable "aurora_instance_class" {

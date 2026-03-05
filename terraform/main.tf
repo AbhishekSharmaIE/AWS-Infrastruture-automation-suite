@@ -48,10 +48,7 @@ module "vpc" {
   create_database_subnet_group       = true
   create_database_subnet_route_table = true
 
-  enable_flow_log                      = true
-  create_flow_log_cloudwatch_log_group = true
-  create_flow_log_cloudwatch_iam_role  = false
-  flow_log_destination_type            = "cloud-watch-logs"
+  enable_flow_log = false
 
   private_subnet_tags = {
     "kubernetes.io/role/internal-elb"            = "1"
